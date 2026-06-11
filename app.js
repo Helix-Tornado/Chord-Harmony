@@ -15,7 +15,6 @@ const statusLabel = document.getElementById('status-label');
 const notesLabel = document.getElementById('notes-label');
 const textBreakdown = document.getElementById('text-breakdown');
 
-// Set up Canvas background view grid parameters
 canvas = document.getElementById('waveCanvas');
 ctx = canvas.getContext('2d');
 resizeCanvas();
@@ -35,7 +34,6 @@ function drawEmptyGrid() {
     ctx.fillStyle = '#2c3e50';
     ctx.fillRect(0, 0, w, h);
     
-    // Draw background grid ticks
     ctx.strokeStyle = 'rgba(255,255,255,0.2)';
     ctx.lineWidth = 1;
     ctx.setLineDash([2, 4]);
@@ -50,7 +48,7 @@ function drawEmptyGrid() {
 
 recordBtn.onclick = async () => {
     if (isAnalyzing) {
-        location.reload(); // Works like your Python refresh build
+        location.reload();
         return;
     }
     
@@ -79,7 +77,6 @@ recordBtn.onclick = async () => {
         recordBtn.innerText = "🔄 RESET SYSTEM";
         recordBtn.style.background = "#7f8c8d";
         
-        // Listen for 3 seconds like DURATION = 3 in Python, then analyze
         setTimeout(() => {
             statusLabel.innerText = "Analyzing...";
             statusLabel.style.color = "#f39c12";
@@ -95,48 +92,47 @@ recordBtn.onclick = async () => {
 
 function runAnalysis() {
     analyzer.getFloatFrequencyData(data);
+    
+    let buffer = new Float32Array(data.length);
+    for (let i = 0; i < data.length; i++) {
+        buffer[i] = Math.pow(10, data[i] / 20);
+    }
+
     let detectedIndices = [];
 
-    // Note detection frequency calculations
     for (let i = 0; i < 12; i++) {
-        let maxVal = -Infinity;
+        let noteActivated = false;
         for (let oct = 2; oct <= 5; oct++) {
-            let freq = 440 * Math.pow(2, (i - 9 + (oct - 4) * 12) / 12);
-            let bin = Math.round(freq * analyzer.fftSize / audioCtx.sampleRate);
-            if (bin >= 0 && bin < data.length) {
-                let val = Math.max(data[bin], data[bin-1]||-Infinity, data[bin+1]||-Infinity);
-                if (val > maxVal) maxVal = val;
+            let targetFreq = 440 * Math.pow(2, (i - 9 + (oct - 4) * 12) / 12);
+            let bin = Math.round(targetFreq * analyzer.fftSize / audioCtx.sampleRate);
+            
+            if (bin >= 2 && bin < buffer.length - 2) {
+                let localPeak = Math.max(buffer[bin], buffer[bin-1], buffer[bin+1], buffer[bin-2], buffer[bin+2]);
+                if (localPeak > 0.0015) { 
+                    noteActivated = true;
+                    break;
+                }
             }
         }
-        let threshold = (i === 7 || i === 0) ? -65 : -56;
-        if (maxVal > threshold) {
-            detectedIndices.push(i);
-        }
+        if (noteActivated) detectedIndices.push(i);
     }
 
-    // Limit to 3 notes max like the Python filter arrays
-    if (detectedIndices.length > 3) {
-        detectedIndices = detectedIndices.slice(0, 3);
-    }
+    if (detectedIndices.length > 3) detectedIndices = detectedIndices.slice(0, 3);
     detectedIndices.sort((a, b) => a - b);
 
-    // Update labels UI element text details
     if (detectedIndices.length > 0) {
         notesLabel.innerText = "Notes: " + detectedIndices.map(i => NOTES[i]).join(', ');
     } else {
-        notesLabel.innerText = "No notes detected.";
+        notesLabel.innerText = "No notes detected. Play closer to the mic.";
     }
 
-    // Calculate harmony score & display raw physics text string
     const [score, mathText, scoreColor] = calculateHarmony(detectedIndices);
     statusLabel.innerText = `Harmony Score: ${score}%`;
     statusLabel.style.color = scoreColor;
     textBreakdown.innerText = mathText;
 
-    // Plot waveform paths directly onto clean UI window panel context
     drawAcousticWaves(detectedIndices);
     
-    // Shut off audio processing streams completely
     source.disconnect();
     isAnalyzing = false;
 }
@@ -146,12 +142,11 @@ function calculateHarmony(indices) {
         return [100, "MATHEMATICAL ANALYSIS:\n\n• Play 2 or more notes to calculate frequency ratios.", "#bdc3c7"];
     }
 
-    // Check Major Triad layout rules configurations
     let isMajorTriad = false;
     let chordName = "";
     if (indices.length === 3) {
         let root = indices[0];
-        let pattern = indices.map(num => (num - root) % 12).sort((a,b) => a-b);
+        let pattern = indices.map(num => (num - root + 12) % 12).sort((a,b) => a-b);
         if (pattern[0] === 0 && pattern[1] === 4 && pattern[2] === 7) {
             isMajorTriad = true;
             chordName = `${NOTES[root]} Major`;
@@ -161,10 +156,6 @@ function calculateHarmony(indices) {
     if (isMajorTriad) {
         let mathText = `MATHEMATICAL ANALYSIS: ${chordName} Triad (3-Notes)\n\n` +
                        `• Physics Frequency Ratios: 4 : 5 : 6\n` +
-                       `• Least Common Multiple: LCM(4, 5, 6) = 60\n` +
-                       `• Science: In an idealized scale, these waves cycle perfectly\n` +
-                       `  together every 60 intervals. On the graph, you see the real,\n` +
-                       `  unaltered acoustic wavelengths moving at their true speeds.\n` +
                        `• Harmony Level: 100% (Perfect Consonancy)`;
         return [100, mathText, "#2ecc71"];
     }
@@ -181,8 +172,7 @@ function calculateHarmony(indices) {
     let rating = finalScore >= 70 ? "Consonant" : (finalScore >= 40 ? "Mild Dissonance" : "Dissonant");
 
     let reasoning = `• Notes Detected: ${indices.map(x => NOTES[x]).join(', ')}\n` +
-                    `• Alignment rating: ${rating}.\n` +
-                    `• Wave structural properties are rendered on screen.\n` +
+                    `• Alignment: ${rating}.\n` +
                     `• Harmony Level: ${finalScore}%`;
 
     return [finalScore, `MATHEMATICAL ANALYSIS:\n\n${reasoning}`, color];
@@ -191,12 +181,9 @@ function calculateHarmony(indices) {
 function drawAcousticWaves(indices) {
     const w = canvas.offsetWidth;
     const h = canvas.offsetHeight;
-    
-    // Background fill colors
     ctx.fillStyle = '#2c3e50';
     ctx.fillRect(0, 0, w, h);
     
-    // Plot lines layout metrics rules
     ctx.strokeStyle = 'rgba(255,255,255,0.15)';
     ctx.lineWidth = 1;
     for(let i=1; i<4; i++) {
@@ -205,24 +192,16 @@ function drawAcousticWaves(indices) {
     }
 
     if (indices.length === 0) return;
-
-    // Standard time calculation sequence windows matching Python (15ms duration bounds)
     const tMax = 0.015; 
-
     indices.forEach(noteIdx => {
         const freq = BASE_FREQS[noteIdx];
         ctx.strokeStyle = SCIENTIFIC_COLORS[noteIdx];
         ctx.lineWidth = 2.5;
         ctx.beginPath();
-
         for (let x = 0; x < w; x++) {
             let t = (x / w) * tMax;
-            // Pure mathematical matching sine array equation model calculations
             let yVal = 0.4 * Math.sin(2 * Math.PI * freq * t);
-            
-            // Map into UI canvas center grid height ranges coordinates
             let canvasY = (h / 2) - (yVal * (h / 1.0)); 
-
             if (x === 0) ctx.moveTo(x, canvasY);
             else ctx.lineTo(x, canvasY);
         }
