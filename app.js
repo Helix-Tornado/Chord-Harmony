@@ -8,6 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const canvas = document.getElementById('waveCanvas');
     const ctx = canvas.getContext('2d');
 
+    // Volume Meter Loop
     function updateMeter() {
         if (analyzer) {
             let array = new Uint8Array(analyzer.frequencyBinCount);
@@ -20,25 +21,44 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     updateMeter();
 
+    // The One-Tap Record Logic
     document.getElementById('record-btn').onclick = async () => {
-        if (isAnalyzing) location.reload();
+        if (isAnalyzing) return;
+        
+        // Reset UI for session
+        document.getElementById('status-label').innerText = "Listening...";
+        document.getElementById('status-label').style.color = "#e74c3c";
+        document.getElementById('record-btn').innerText = "RECORDING...";
+        document.getElementById('record-btn').style.background = "#7f8c8d";
+        
         try {
-            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (audioCtx.state === 'suspended') await audioCtx.resume();
+            
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             source = audioCtx.createMediaStreamSource(stream);
             analyzer = audioCtx.createAnalyser();
             analyzer.fftSize = 16384;
             source.connect(analyzer);
             data = new Float32Array(analyzer.frequencyBinCount);
+            
             isAnalyzing = true;
-            document.getElementById('status-label').innerText = "Listening...";
+            
             setTimeout(() => {
                 document.getElementById('status-label').innerText = "Analyzing...";
                 runAnalysis();
+                
+                // Reset UI after analysis
+                source.disconnect();
+                isAnalyzing = false;
+                document.getElementById('record-btn').innerText = "🔴 RECORD PIANO";
+                document.getElementById('record-btn').style.background = "#e74c3c";
             }, 3000);
         } catch (e) { 
-            alert("Mic Error: " + e); 
-            console.error(e);
+            alert("Microphone Error: " + e); 
+            document.getElementById('record-btn').innerText = "🔴 RECORD PIANO";
+            document.getElementById('record-btn').style.background = "#e74c3c";
+            isAnalyzing = false;
         }
     };
 
@@ -46,6 +66,7 @@ document.addEventListener('DOMContentLoaded', () => {
         analyzer.getFloatFrequencyData(data);
         let buffer = new Float32Array(data.length);
         for (let i = 0; i < data.length; i++) buffer[i] = Math.pow(10, data[i] / 20);
+
         let detected = [];
         for (let i = 0; i < 12; i++) {
             for (let oct = 2; oct <= 5; oct++) {
@@ -58,6 +79,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         detected = [...new Set(detected)].sort((a,b) => a-b).slice(0, 3);
         document.getElementById('notes-label').innerText = "Notes: " + (detected.length ? detected.map(i => NOTES[i]).join(', ') : "None");
+        
         const [score, text, color] = calculateHarmony(detected);
         document.getElementById('status-label').innerText = `Harmony Score: ${score}%`;
         document.getElementById('status-label').style.color = color;
